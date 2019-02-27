@@ -46,7 +46,17 @@ app.get('/', async (request, response) => {
   logger.info('Trying ' + url);
 
   const timeout = request.query.timeout || 25000;
-  const browser = await puppeteer.launch({headless: true});
+
+  const chromeFlags = [
+    '--disable-gpu',
+    '--headless',
+    '--no-zygote',
+    '--no-sandbox',
+    '--headless',
+  ];
+
+  const browser = await puppeteer.launch({args:chromeFlags});
+
   const viewport = {
     width: 1920,
     height: 1080,
