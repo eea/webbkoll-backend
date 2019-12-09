@@ -5,7 +5,8 @@ const puppeteer = require('puppeteer');
 const {TimeoutError} = require('puppeteer/Errors');
 const {URL} = require('url');
 const log4js = require('log4js');
-const psl = require('psl');
+const tldjs = require('tldjs');
+const ip = require('ip');
 
 log4js.configure({
   appenders: {
@@ -23,14 +24,19 @@ log4js.configure({
 const logger = log4js.getLogger();
 
 const PORT = process.env.PORT || 8100;
+const WEBBKOLL_ENV = process.env.WEBBKOLL_ENV || 'prod';
 const app = express();
 
+function urldecode(url) {
+  return decodeURIComponent(url.replace(/\+/g, ' '));
+}
+
 app.get('/', async (request, response) => {
-  const url = request.query.fetch_url;
+  const url = urldecode(request.query.fetch_url);
 
   try {
-    const parsedUrl = new URL(request.query.fetch_url);
-    if (!['http:', 'https:'].includes(parsedUrl.protocol) || !(psl.parse(parsedUrl.hostname).listed)) {
+    const parsedUrl = new URL(urldecode(request.query.fetch_url));
+    if (!['http:', 'https:'].includes(parsedUrl.protocol) || !(tldjs.parse(parsedUrl.hostname).tldExists)) {
       return response.status(500).type('application/json').send(JSON.stringify({
         'success': false,
         'reason': 'Failed to fetch this URL: invalid URL',
@@ -68,20 +74,34 @@ app.get('/', async (request, response) => {
     const client = await page.target().createCDPSession();
 
     await page.setViewport(viewport);
-    await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36');
+    await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3803.0 Safari/537.36');
 
-    let responses = [];
+    if (WEBBKOLL_ENV != 'dev') {
+      await page.setRequestInterception(true);
+      page.on('request', (interceptedRequest) => {
+        const parsedUrl = tldjs.parse(interceptedRequest.url());
+        // Unless in dev mode, don't allow requests to private IPs or to
+        // domains with non-existent TLDs
+        if ((parsedUrl.isIp && ip.isPrivate(parsedUrl.hostname)) || (!parsedUrl.isIp && !parsedUrl.tldExists)) {
+          interceptedRequest.abort();
+        } else {
+          interceptedRequest.continue();
+        }
+      });
+    }
+
+    const responses = [];
     page.on('response', (response) => {
       responses.push({
         'url': response.url(),
         'remote_address': response.remoteAddress(),
-        'headers': response.headers()
+        'headers': response.headers(),
       });
     });
 
     await client.send('Security.enable');
     let securityInfo = {};
-    client.on('Security.securityStateChanged', state => {
+    client.on('Security.securityStateChanged', (state) => {
       securityInfo = state;
     });
 
@@ -99,52 +119,52 @@ app.get('/', async (request, response) => {
       });
     } catch (err) {
       if (err instanceof TimeoutError) {
-        logger.info('First try of ' + url + ' timed out; trying with just networkidle2');
+        logger.info(`First try of ${url} timed out; trying with just networkidle2`);
         pageResponse = await page.goto(url, {
           waitUntil: ['networkidle2'],
           timeout: timeout,
         });
+      } else {
+        throw (err);
       }
     }
 
-    let content = await page.content();
+    const content = await page.content();
     // Necessary to get *ALL* cookies
-    let cookies = await client.send('Network.getAllCookies');
-    //let localStorage = await page.evaluate(() => { return {...localStorage}; });
+    const cookies = await client.send('Network.getAllCookies');
+    // let localStorage = await page.evaluate(() => { return {...localStorage}; });
     // ^- prettier, but we've got to truncate things for sanity:
     let localStorageData = {};
     try {
       localStorageData = await page.evaluate(() => {
-        let tmpObj = {};
-        let keys = Object.keys(localStorage);
+        const tmpObj = {};
+        const keys = Object.keys(localStorage);
         for (let i = 0; i < keys.length; ++i) {
-          tmpObj[keys[i].substring(0,100)] = localStorage.getItem(keys[i]).substring(0,100);
+          tmpObj[keys[i].substring(0, 100)] = localStorage.getItem(keys[i]).substring(0, 100);
         }
         return tmpObj;
       });
     } catch (err) {
-      console.log("Accessing localStorage failed. This shouldn't happen. Error:");
+      console.log(`Accessing localStorage failed. This shouldn't happen. Error:`);
       console.log(err);
     }
 
-    let title = await page.title();
+    const title = await page.title();
 
-    // TOOD: Use request interception to make sure we never try to load URLs that are IP addresses
-    // or that have an unlisted TLD (specifically after redirect from valid URL)
-    let finalUrl = await page.url();
-    let parsedUrl = new URL(finalUrl);
-    let isValidUrl = psl.parse(parsedUrl.hostname).listed;
+    const finalUrl = await page.url();
+    const parsedUrl = new URL(finalUrl);
+    const isValidUrl = tldjs.parse(parsedUrl.hostname).tldExists;
 
-    let responseHeaders = pageResponse.headers();
-    let responseStatus = pageResponse.status();
+    const responseHeaders = pageResponse.headers();
+    const responseStatus = pageResponse.status();
 
     let webbkollStatus = 200;
     let results = {};
     if (responseStatus >= 200 && responseStatus <= 299 && isValidUrl) {
       // TODO: Use response interception when available
       // (https://github.com/GoogleChrome/puppeteer/issues/1191)
-      if (responseHeaders['content-type'].startsWith('text/html') || responseHeaders['content-type'].startsWith('application/xhtml+xml')) {
-        logger.info('Successfully checked ' + url);
+      if (responseHeaders['content-type'] && (responseHeaders['content-type'].startsWith('text/html') || responseHeaders['content-type'].startsWith('application/xhtml+xml'))) {
+        logger.info(`Successfully checked ${url}`);
         results = {
           'success': true,
           'input_url': url,
@@ -156,10 +176,10 @@ app.get('/', async (request, response) => {
           'cookies': cookies.cookies,
           'localStorage': localStorageData,
           'security_info': securityInfo,
-          'content': content.substring(0, 5000000) // upper limit for sanity
+          'content': content.substring(0, 5000000), // upper limit for sanity
         };
       } else {
-        logger.warn('Failed checking ' + url + ': ' + responseStatus);
+        logger.warn(`Failed checking ${url}: ${responseStatus}`);
         results = {
           'success': false,
           'reason': 'Page does not have text/html Content-Type',
@@ -167,17 +187,17 @@ app.get('/', async (request, response) => {
         webbkollStatus = 500;
       }
     } else if (!isValidUrl) {
-      logger.warn('Failed checking ' + url + ': ' + responseStatus);
+      logger.warn(`Failed checking ${url}: ${responseStatus}`);
       results = {
         'success': false,
         'reason': 'Invalid URL.',
       };
       webbkollStatus = 500;
     } else {
-      logger.warn('Failed checking ' + url + ': ' + responseStatus);
+      logger.warn(`Failed checking ${url}: ${responseStatus}`);
       results = {
         'success': false,
-        'reason': 'Failed to fetch this URL: ' + responseStatus + ' (' + title + ')',
+        'reason': `Failed to fetch this URL: ${responseStatus} (${title})`,
       };
       webbkollStatus = 500;
     }
@@ -185,14 +205,14 @@ app.get('/', async (request, response) => {
     response.status(webbkollStatus).type('application/json').send(JSON.stringify(results));
     await context.close();
   } catch (err) {
-    logger.warn('Failed checking ' + url + ': ' + err.toString());
+    logger.warn(`Failed checking ${url}: ${err.toString()}`);
     response.status(500).type('application/json').send(JSON.stringify({
       'success': false,
-      'reason': 'Failed to fetch this URL: ' + err.toString(),
+      'reason': `Failed to fetch this URL: ${err.toString()}`,
     }));
   }
   await browser.close();
-  logger.info('Finished with ' + url);
+  logger.info(`Finished with ${url}`);
 });
 
 app.get('/status', async (request, response) => {
