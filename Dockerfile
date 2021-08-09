@@ -1,4 +1,4 @@
-FROM node:8.10.0
+FROM node:12
 
 RUN mkdir -p /webbkoll-backend
 
