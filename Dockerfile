@@ -1,6 +1,4 @@
-FROM node:12
-
-RUN mkdir -p /webbkoll-backend
+FROM node:24
 
 RUN \
     wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
@@ -12,9 +10,9 @@ RUN \
 
 #USER node
 
-WORKDIR /webbkoll-backend
+RUN git clone https://codeberg.org/dataskydd.net/webbkoll-backend.git
 
-COPY . .
+WORKDIR /webbkoll-backend
 
 RUN npm install
 
