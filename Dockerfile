@@ -8,13 +8,17 @@ RUN \
     wget https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_amd64.deb && \
     dpkg -i dumb-init_*.deb
 
-#USER node
-
 RUN git clone https://codeberg.org/dataskydd.net/webbkoll-backend.git
 
 WORKDIR /webbkoll-backend
 
 RUN npm install
+
+RUN sed -i "s|puppeteer.launch({|puppeteer.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox','--disable-setuid-sandbox'],|" index.js
+
+RUN chown -R node:node /webbkoll-backend
+
+USER node
 
 EXPOSE 8100
 
