@@ -8,7 +8,7 @@ RUN \
     wget https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_amd64.deb && \
     dpkg -i dumb-init_*.deb
 
-RUN git clone https://codeberg.org/dataskydd.net/webbkoll-backend.git
+RUN git clone --depth 1 https://codeberg.org/dataskydd.net/webbkoll-backend.git
 
 WORKDIR /webbkoll-backend
 
