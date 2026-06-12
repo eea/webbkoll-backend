@@ -5,8 +5,27 @@ It's a tiny script that makes use of [Puppeteer](https://github.com/GoogleChrome
 It visits a given URL with Chromium and returns JSON with headers, cookies, requests, etc.
 It's not pretty.
 
-Node 10.18.1+ required. Simply run `npm install`, which should install everything necessary,
-including a local copy of Chromium; and then `npm start` or (`nodejs index.js`) to start.
+## Docker deployment
+
+The recommended deployment method is via Docker. The `Dockerfile` builds a container with:
+
+- **Node 24** base image
+- **Google Chrome Stable** (system Chromium, not Puppeteer's bundled copy)
+- **Shallow clone** of upstream source from [dataskydd.net/webbkoll-backend](https://codeberg.org/dataskydd.net/webbkoll-backend)
+- **Non-root user**: runs as `node` user with sandbox-disabled Chrome flags (`--no-sandbox`, `--disable-setuid-sandbox`)
+- **dumb-init** as PID 1 for proper signal handling
+
+Build and run:
+
+```sh
+docker build -t webbkoll-backend .
+docker run -p 8100:8100 webbkoll-backend
+```
+
+## Manual setup (without Docker)
+
+Node 24+ required. Run `npm install`, which installs everything necessary including a local copy of Chromium; then `npm start` (or `node index.js`) to start.
+
 Usage: `http://localhost:8100/?fetch_url=http://www.example.com`
 
 Make sure you have all necessary system dependencies; see [Puppeteer's troubleshooting page](https://github.com/GoogleChrome/puppeteer/blob/master/docs/troubleshooting.md) for e.g. a list of necessary Ubuntu/Debian packages.
@@ -42,5 +61,8 @@ Run `systemctl daemon-reload` for good measure, and then try `systemctl start we
 (And `systemctl enable webbkoll-backend` to have it started automatically.)
 
 ## Important
-Always upgrade both webbkoll and webbkoll-backend, because there might be backward compatibility issues between them.
-For webbkoll-backend look for changes in https://github.com/andersju/webbkoll-backend and compare with our fork at https://github.com/eea/webbkoll-backend
+
+Always upgrade both webbkoll and webbkoll-backend together — backward compatibility between versions is not guaranteed.
+
+Upstream source: [codeberg.org/dataskydd.net/webbkoll-backend](https://codeberg.org/dataskydd.net/webbkoll-backend)
+EEA fork: [github.com/eea/webbkoll-backend](https://github.com/eea/webbkoll-backend)
